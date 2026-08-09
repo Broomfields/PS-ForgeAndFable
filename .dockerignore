@@ -1,0 +1,10 @@
+# Keep local build artifacts and IDE cruft out of the build context so the image
+# is built purely from source (the publish inside the image is authoritative).
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/*.user
+.git/
+out/
+out_*/
