@@ -1,0 +1,62 @@
+/* ──────────────────────────────────────────────
+   Career Timeline Marker — annotation on the line
+   between two entries (e.g. an acquisition).
+   ────────────────────────────────────────────── */
+
+/*
+ * Centres the label over the vertical timeline line. Sits in the same
+ * negative-margin rhythm as entries so the pill overlaps the line cleanly.
+ */
+.timeline-marker {
+    display: flex;
+    justify-content: center;
+    margin: -12px 0 28px;
+    position: relative;
+    z-index: 2;
+}
+
+/*
+ * Pill styled to read as metadata, not a card — muted surface, dashed accent
+ * border, and a solid background so it masks the line passing behind it.
+ */
+.timeline-marker-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    border-radius: 999px;
+    background: var(--mud-palette-background);
+    border: 1px dashed rgba(122, 158, 53, 0.5);
+    box-shadow: 0 0 0 4px var(--mud-palette-background);
+}
+
+/*
+ * ::deep is required because MudIcon renders its <svg> as raw markup, so the
+ * component's scope attribute never lands on it — a plain scoped selector misses.
+ * Rotated to point down, mirroring the top-to-bottom flow of the timeline.
+ */
+.timeline-marker-label ::deep .timeline-marker-icon {
+    color: var(--mud-palette-primary);
+    opacity: 0.85;
+    transform: rotate(180deg);
+}
+
+.timeline-marker-text {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--mud-palette-text-secondary);
+}
+
+/* ── Responsive: align to the left-anchored line on mobile ── */
+@media (max-width: 640px) {
+    .timeline-marker {
+        justify-content: flex-start;
+        padding-left: 4px;
+        margin: -4px 0 24px;
+    }
+
+    .timeline-marker-text {
+        font-size: 0.74rem;
+    }
+}

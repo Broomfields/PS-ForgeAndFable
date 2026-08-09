@@ -1,0 +1,13 @@
+<div class="timeline-marker">
+    <span class="timeline-marker-label">
+        <MudIcon Icon="@Icon" Size="Size.Small" Class="timeline-marker-icon" />
+        <span class="timeline-marker-text">@Label</span>
+    </span>
+</div>
+
+@code {
+    /// <summary>The annotation text, e.g. "DEF Software acquired by Infoshare+".</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    /// <summary>Icon shown before the label. Defaults to a merge-type glyph.</summary>
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.CallMerge;
+}
