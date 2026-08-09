@@ -24,6 +24,11 @@ public class GitHubService : IGitHubService
     // Key: "{owner}/{repo}"
     private readonly Dictionary<string, (GitHubRepoStats Stats, DateTime CachedAt)>
         _cache = new();
+
+    // Key: account login (lower-cased for case-insensitive reuse)
+    private readonly Dictionary<string, (GitHubContributions Contributions, DateTime CachedAt)>
+        _contributionsCache = new();
+
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(30);
 
     public GitHubService(
@@ -72,7 +77,99 @@ public class GitHubService : IGitHubService
         return stats;
     }
 
+    /// <summary>
+    /// Fetches (and caches) a year of public contribution activity for the given
+    /// login by scraping GitHub's public contributions calendar HTML fragment.
+    /// Returns null if the login is empty, the fetch fails, or no day cells parse.
+    /// </summary>
+    public async Task<GitHubContributions?> FetchContributionsAsync(string? username)
+    {
+        if (string.IsNullOrWhiteSpace(username)) return null;
+
+        var login = username.Trim();
+        var key   = login.ToLowerInvariant();
+
+        if (_contributionsCache.TryGetValue(key, out var cached) &&
+            DateTime.UtcNow - cached.CachedAt < CacheTtl)
+            return cached.Contributions;
+
+        var http = _httpClientFactory.CreateClient("github");
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            // Not the api.github.com host — this is the same public HTML fragment the
+            // profile page renders. The "github" client's User-Agent still applies.
+            var html = await http.GetStringAsync(
+                $"https://github.com/users/{login}/contributions", cts.Token);
+
+            var contributions = ParseContributions(login, html);
+            if (contributions.Days.Count == 0) return null;
+
+            _contributionsCache[key] = (contributions, DateTime.UtcNow);
+            return contributions;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch GitHub contributions for '{Login}'.", login);
+            return null;
+        }
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    // Day cells look like:
+    //   <td ... data-date="2025-08-10" id="contribution-day-component-0-0" data-level="0" ...>
+    // and each has a matching tooltip elsewhere in the document:
+    //   <tool-tip ... for="contribution-day-component-0-0" ...>5 contributions on ...</tool-tip>
+    // We parse the cells for date+level+id, then join the tooltips by id for counts.
+    private static readonly System.Text.RegularExpressions.Regex DayCellRegex = new(
+        """data-date="(?<date>\d{4}-\d{2}-\d{2})"[^>]*?id="(?<id>contribution-day-component-\d+-\d+)"[^>]*?data-level="(?<level>\d)""",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly System.Text.RegularExpressions.Regex TooltipRegex = new(
+        """for="(?<id>contribution-day-component-\d+-\d+)"[^>]*>(?<text>[^<]*)</tool-tip>""",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly System.Text.RegularExpressions.Regex LeadingCountRegex = new(
+        @"^(?<n>[\d,]+)\s+contribution",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static GitHubContributions ParseContributions(string login, string html)
+    {
+        // Map cell id -> count from the tooltips. "No contributions on ..." => 0.
+        var counts = new Dictionary<string, int>();
+        foreach (System.Text.RegularExpressions.Match m in TooltipRegex.Matches(html))
+        {
+            var id   = m.Groups["id"].Value;
+            var text = m.Groups["text"].Value.TrimStart();
+            var lc   = LeadingCountRegex.Match(text);
+            counts[id] = lc.Success && int.TryParse(
+                lc.Groups["n"].Value.Replace(",", ""), out var n) ? n : 0;
+        }
+
+        var days  = new List<GitHubContributionDay>();
+        var total = 0;
+
+        foreach (System.Text.RegularExpressions.Match m in DayCellRegex.Matches(html))
+        {
+            if (!DateOnly.TryParse(m.Groups["date"].Value, out var date)) continue;
+            _ = int.TryParse(m.Groups["level"].Value, out var level);
+            var count = counts.GetValueOrDefault(m.Groups["id"].Value);
+
+            days.Add(new GitHubContributionDay { Date = date, Count = count, Level = level });
+            total += count;
+        }
+
+        days.Sort((a, b) => a.Date.CompareTo(b.Date));
+
+        return new GitHubContributions
+        {
+            Login              = login,
+            TotalContributions = total,
+            Days               = days,
+        };
+    }
 
     private async Task<GitHubRepoStats?> FetchMainStatsAsync(
         HttpClient http, string key, CancellationToken ct)

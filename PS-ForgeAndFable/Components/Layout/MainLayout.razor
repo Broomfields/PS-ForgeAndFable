@@ -13,6 +13,7 @@
         <div class="drawer-layout">
             <NavMenu />
             <MudSpacer />
+            <GitHubContributionsPanel Accounts="GitHubAccounts" Compact="true" />
             <AppFooter />
         </div>
     </MudDrawer>
@@ -31,6 +32,13 @@
 
 @code {
     private MudTheme? _theme = null;
+
+    // GitHub accounts surfaced in the drawer activity panel — personal and work.
+    private static readonly IReadOnlyList<GitHubAccountRef> GitHubAccounts = new[]
+    {
+        new GitHubAccountRef("Personal", "Broomfields"),
+        new GitHubAccountRef("Work",     "ShaunBroomfield"),
+    };
 
     protected override void OnInitialized()
     {

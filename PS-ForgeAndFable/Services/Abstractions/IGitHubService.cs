@@ -15,4 +15,11 @@ public interface IGitHubService
     /// Returns null if the URL is empty, unparseable, or the API call fails.
     /// </summary>
     Task<GitHubRepoStats?> FetchRepoStatsAsync(string? repoUrl);
+
+    /// <summary>
+    /// Fetches (and caches) a year of public contribution activity for the given
+    /// login, scraped from GitHub's public contributions calendar HTML.
+    /// Returns null if the login is empty or the fetch/parse fails.
+    /// </summary>
+    Task<GitHubContributions?> FetchContributionsAsync(string? username);
 }

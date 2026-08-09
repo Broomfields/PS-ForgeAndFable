@@ -1,0 +1,172 @@
+@using ForgeAndFable.Models
+@using ForgeAndFable.Services
+@inject IGitHubService GitHubService
+
+@*
+ * Contribution heatmaps for the Programming list view — one calendar per
+ * referenced account (personal + work), rendered from the shared IGitHubService
+ * contributions cache. A failed/empty fetch simply omits that account's graph.
+ *@
+
+@if (Accounts is { Count: > 0 })
+{
+    <div class="ghc-panel @(Compact ? "ghc-panel--compact" : "")">
+        @if (!Compact)
+        {
+            <p class="ghc-label">GitHub Activity</p>
+        }
+
+        @if (_isLoading && _data.Count == 0)
+        {
+            <div class="ghc-loading">
+                <MudProgressCircular Size="Size.Small" Indeterminate="true"
+                                     Style="width:16px;height:16px;" />
+            </div>
+        }
+        else
+        {
+            @foreach (var account in Accounts)
+            {
+                var contributions = _data.GetValueOrDefault(account.Username.ToLowerInvariant());
+                if (contributions is null) { continue; }
+
+                var weeks = BuildWeeks(contributions.Days);
+
+                <div class="ghc-account">
+                    <div class="ghc-head">
+                        <span class="ghc-tag">@account.Label</span>
+                        <a class="ghc-login"
+                           href="@($"https://github.com/{contributions.Login}")"
+                           target="_blank"
+                           rel="noopener noreferrer">
+                            <svg class="ghc-login-logo" height="14" viewBox="0 0 16 16" width="14"
+                                 fill="currentColor" aria-hidden="true">
+                                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                            </svg>
+                            @@@contributions.Login
+                        </a>
+                        <span class="ghc-total">
+                            @if (Compact)
+                            {
+                                @($"{contributions.TotalContributions:N0} this year")
+                            }
+                            else
+                            {
+                                @($"{contributions.TotalContributions:N0} contributions in the last year")
+                            }
+                        </span>
+                    </div>
+
+                    <div class="ghc-graph-scroll">
+                        <div class="ghc-graph" role="img"
+                             aria-label="@($"{contributions.TotalContributions} contributions by {contributions.Login} in the last year")">
+                            @foreach (var week in weeks)
+                            {
+                                <div class="ghc-week">
+                                    @foreach (var day in week)
+                                    {
+                                        @if (day is null)
+                                        {
+                                            <div class="ghc-cell ghc-cell--empty"></div>
+                                        }
+                                        else
+                                        {
+                                            <div class="ghc-cell" data-level="@day.Level"
+                                                 title="@FormatDayTooltip(day)"></div>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (!Compact)
+            {
+                <div class="ghc-legend">
+                    <span class="ghc-legend-lbl">Less</span>
+                    <div class="ghc-cell" data-level="0"></div>
+                    <div class="ghc-cell" data-level="1"></div>
+                    <div class="ghc-cell" data-level="2"></div>
+                    <div class="ghc-cell" data-level="3"></div>
+                    <div class="ghc-cell" data-level="4"></div>
+                    <span class="ghc-legend-lbl">More</span>
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    /// <summary>The accounts to render, in display order.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<GitHubAccountRef>? Accounts { get; set; }
+
+    /// <summary>
+    /// Renders the condensed sidebar variant — smaller cells, no legend or heading,
+    /// stripped card chrome. Defaults to the full-size page variant.
+    /// </summary>
+    [Parameter] public bool Compact { get; set; }
+
+    // Key: account login, lower-cased (matches lookup in markup).
+    private readonly Dictionary<string, GitHubContributions> _data = new();
+    private bool _isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Accounts is not { Count: > 0 })
+        {
+            _isLoading = false;
+            return;
+        }
+
+        var tasks = Accounts
+            .Select(a => a.Username)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(async username =>
+            {
+                var contributions = await GitHubService.FetchContributionsAsync(username);
+                if (contributions is not null)
+                    _data[username.ToLowerInvariant()] = contributions;
+            });
+
+        await Task.WhenAll(tasks);
+        _isLoading = false;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Arranges a flat, date-sorted day list into calendar columns (weeks). Each
+    /// column holds 7 slots, Sunday (row 0) to Saturday, mirroring GitHub's layout.
+    /// Slots before the first day or after the last are null (rendered as padding).
+    /// </summary>
+    private static IReadOnlyList<GitHubContributionDay?[]> BuildWeeks(
+        IReadOnlyList<GitHubContributionDay> days)
+    {
+        if (days.Count == 0) return Array.Empty<GitHubContributionDay?[]>();
+
+        var first     = days[0].Date;
+        var gridStart = first.AddDays(-(int)first.DayOfWeek); // back up to Sunday
+        var last      = days[^1].Date;
+        var weekCount = (last.DayNumber - gridStart.DayNumber) / 7 + 1;
+
+        var weeks = new GitHubContributionDay?[weekCount][];
+        for (var w = 0; w < weekCount; w++)
+            weeks[w] = new GitHubContributionDay?[7];
+
+        foreach (var day in days)
+        {
+            var idx = day.Date.DayNumber - gridStart.DayNumber;
+            weeks[idx / 7][idx % 7] = day;
+        }
+
+        return weeks;
+    }
+
+    private static string FormatDayTooltip(GitHubContributionDay day)
+    {
+        var noun = day.Count == 1 ? "contribution" : "contributions";
+        return $"{day.Count} {noun} on {day.Date:MMM d, yyyy}";
+    }
+}
